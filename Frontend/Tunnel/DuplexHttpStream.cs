@@ -6,10 +6,12 @@ internal class DuplexHttpStream : Stream, IValueTaskSource<object?>, ICloseable
     private readonly object _sync = new();
 
     private readonly HttpContext _context;
+    private readonly ILogger? _logger;
 
     public DuplexHttpStream(HttpContext context)
     {
         _context = context;
+         _logger = _context.RequestServices.GetService<ILogger<DuplexHttpStream>>();
     }
 
     private Stream RequestBody => _context.Request.Body;
@@ -35,10 +37,32 @@ internal class DuplexHttpStream : Stream, IValueTaskSource<object?>, ICloseable
     }
 
     public override ValueTask WriteAsync(ReadOnlyMemory<byte> buffer, CancellationToken cancellationToken = default)
-     => ResponseBody.WriteAsync(buffer, cancellationToken);
+    {
+        try
+        {
+            return ResponseBody.WriteAsync(buffer, cancellationToken);
+
+        }
+        catch(Exception ex)
+        {
+            _logger?.LogDebug("WriteAsync exception {exception} ", ex.Message/*, ex.StackTrace*/);
+            throw;
+        }    
+    }
 
     public override ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default)
-     => RequestBody.ReadAsync(buffer, cancellationToken);
+    {
+        try
+        {
+            return RequestBody.ReadAsync(buffer, cancellationToken);
+
+        }
+        catch(Exception ex)
+        {
+            _logger?.LogDebug("ReadAsync exception {exception} ", ex.Message);
+            throw;
+        }    
+    }
 
     public object? GetResult(short token) => _tcs.GetResult(token);
 

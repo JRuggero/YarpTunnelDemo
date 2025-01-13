@@ -13,33 +13,53 @@ public static class TunnelExensions
 
     public static IEndpointConventionBuilder MapHttp2Tunnel(this IEndpointRouteBuilder routes, string path)
     {
-        return routes.MapPost(path, static async (HttpContext context, string host, TunnelClientFactory tunnelFactory, IHostApplicationLifetime lifetime) =>
+        return routes.MapPost(path, static async (HttpContext context, string host, TunnelClientFactory tunnelFactory, IHostApplicationLifetime lifetime, ILoggerFactory loggerFactory) =>
         {
             // HTTP/2 duplex stream
             if (context.Request.Protocol != HttpProtocol.Http2)
             {
                 return Results.BadRequest();
             }
+            var logger = loggerFactory.CreateLogger("Yarp.ReverseProxy.Http2Endpoint");
+
+            var tunnelId = context.GetHashCode();
+            logger.LogDebug("Http2Tunnel {tunnelId} hitted", tunnelId);
 
             var (requests, responses) = tunnelFactory.GetConnectionChannel(host);
 
-            await requests.Reader.ReadAsync(context.RequestAborted);
+            try
+            {
+                await requests.Reader.ReadAsync(context.RequestAborted);
+            }
+            catch(Exception ex)
+            {
+                logger.LogDebug("requests.Reader.ReadAsync exception: {exception}", ex.Message);
+
+                //throw;
+                logger.LogDebug("Http2Tunnel {tunnelId} finished", tunnelId);
+                return EmptyResult.Instance;
+            }
 
             var stream = new DuplexHttpStream(context);
+            logger.LogDebug("Stream {streamId}({tunnelId}) created", stream.GetHashCode(), tunnelId);
 
             using var reg = lifetime.ApplicationStopping.Register(() => stream.Abort());
 
             // Keep reusing this connection while, it's still open on the backend
-            while (!context.RequestAborted.IsCancellationRequested)
+            while (!context.RequestAborted.IsCancellationRequested && !stream.IsClosed)
             {
                 // Make this connection available for requests
                 await responses.Writer.WriteAsync(stream, context.RequestAborted);
+                logger.LogDebug("Stream {streamId}({tunnelId}) added to streams queue", stream.GetHashCode(), tunnelId);
 
                 await stream.StreamCompleteTask;
+                logger.LogDebug("Stream {streamId}({tunnelId}) completed", stream.GetHashCode(), tunnelId);
 
-                stream.Reset();
+                if (!stream.IsClosed)
+                    stream.Reset();
             }
 
+            logger.LogDebug("Http2Tunnel {tunnelId} finished", tunnelId);
             return EmptyResult.Instance;
         });
     }
