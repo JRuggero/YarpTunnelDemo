@@ -46,7 +46,8 @@ public static class TunnelExensions
             using var reg = lifetime.ApplicationStopping.Register(() => stream.Abort());
 
             // Keep reusing this connection while, it's still open on the backend
-            while (!context.RequestAborted.IsCancellationRequested && !stream.IsClosed)
+            if(!context.RequestAborted.IsCancellationRequested && !stream.IsClosed)
+            //while(!context.RequestAborted.IsCancellationRequested && !stream.IsClosed)
             {
                 // Make this connection available for requests
                 await responses.Writer.WriteAsync(stream, context.RequestAborted);
@@ -55,8 +56,8 @@ public static class TunnelExensions
                 await stream.StreamCompleteTask;
                 logger.LogDebug("Stream {streamId}({tunnelId}) completed", stream.GetHashCode(), tunnelId);
 
-                if (!stream.IsClosed)
-                    stream.Reset();
+                ////if (!stream.IsClosed)
+                //    stream.Reset();
             }
 
             logger.LogDebug("Http2Tunnel {tunnelId} finished", tunnelId);
